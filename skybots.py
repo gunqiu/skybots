@@ -14,9 +14,8 @@ from seleniumbase import SB
 TARGET_URL = "https://dash.skybots.tech/login"
 DASHBOARD_URL = "https://dash.skybots.tech/projects"
 
-# 改成 Discord 登录（只需要 Token）
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "").strip()
-PROXY = os.environ.get("skybots_PROXY_NODE", "")
+PROXY = os.environ.get("skybots_PROXY_NODE", "").strip()
 
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "")
@@ -36,7 +35,7 @@ def send_tg_photo(caption, image_path):
     except Exception as e:
         print(f"⚠️ TG 推送失败: {e}")
 
-# 强制暴露隐藏的 CF 盾
+# 【增强版】强制暴露隐藏的 CF 盾
 EXPAND_POPUP_JS = """
 (function() {
     var iframes = document.querySelectorAll('iframe');
@@ -47,12 +46,18 @@ EXPAND_POPUP_JS = """
             iframe.style.minWidth = '300px';
             iframe.style.visibility = 'visible';
             iframe.style.opacity = '1';
+            iframe.style.display = 'block';
+            iframe.style.position = 'fixed';
+            iframe.style.top = '50%';
+            iframe.style.left = '50%';
+            iframe.style.transform = 'translate(-50%, -50%)';
+            iframe.style.zIndex = '9999';
         }
     });
 })();
 """
 
-# 获取盾的绝对屏幕坐标
+# 【增强版】获取盾的绝对屏幕坐标
 def get_turnstile_coords(sb):
     return sb.execute_script("""
         var iframes = document.querySelectorAll('iframe');
@@ -68,7 +73,7 @@ def get_turnstile_coords(sb):
                     var chromeBarHeight = outerHeight - innerHeight;
                     
                     var abs_x = Math.round(rect.x + 30) + screenX;
-                    var abs_y = Math.round(rect.y + rect.height / 2) + screenY + chromeBarHeight;
+                    var abs_y = Math.round(rect.y + 20) + screenY + chromeBarHeight;
                     
                     return {x: abs_x, y: abs_y};
                 }
@@ -80,14 +85,12 @@ def get_turnstile_coords(sb):
 # 使用 Linux 底层工具进行物理点击
 def os_hardware_click(x, y):
     try:
-        # 激活浏览器窗口
         result = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "chrome"], capture_output=True, text=True)
         w_ids = result.stdout.strip().split('\n')
         if w_ids and w_ids[0]:
             subprocess.run(["xdotool", "windowactivate", w_ids[0]], stderr=subprocess.DEVNULL)
-            time.sleep(0.2)
+            time.sleep(0.3)
         
-        # 移动并点击
         os.system(f"xdotool mousemove {int(x)} {int(y)} click 1")
         print(f"👆 已使用 xdotool 物理点击屏幕坐标 ({x}, {y})")
         return True
@@ -97,7 +100,6 @@ def os_hardware_click(x, y):
 
 # ================= 主逻辑 =================
 def main():
-    # 改为校验 Discord Token
     if not DISCORD_TOKEN:
         print("❌ 缺少 DISCORD_TOKEN 环境变量")
         sys.exit(1)
@@ -108,14 +110,13 @@ def main():
         "test": True, 
         "headless": False, 
         "locale": "en", 
-        "chromium_arg": "--disable-dev-shm-usage,--no-sandbox,--start-maximized"
+        "chromium_arg": "--disable-dev-shm-usage,--no-sandbox,--start-maximized,--disable-blink-features=AutomationControlled"
     }
     if PROXY:
         opts["proxy"] = PROXY
         print(f"🛡️ 使用代理: {PROXY}")
 
     with SB(**opts) as sb:
-        # 强制 xvfb 窗口大小
         sb.set_window_rect(0, 0, 1280, 720)
         
         try:
@@ -127,13 +128,10 @@ def main():
                 print("✅ 似乎已经处于登录状态！")
             else:
                 print("🛡️ 正在进入 Discord 登录流程...")
-
-                # ====================== 核心修改：点击 Discord 登录按钮 ======================
                 print("🔗 点击 Discord 快捷登录")
                 sb.click('a[href*="discord"], button:contains("Discord")', timeout=15)
                 time.sleep(5)
 
-                # 处理 Cloudflare 验证（完全保留你原来的逻辑）
                 print("🛡️ 开始处理 Cloudflare 验证框...")
                 time.sleep(3)
 
@@ -144,10 +142,10 @@ def main():
                     sb.click('body', timeout=2) 
                     time.sleep(1)
 
+                # 【关键】强制显示并居中 CF 验证框
                 sb.execute_script(EXPAND_POPUP_JS)
-                time.sleep(1)
+                time.sleep(2)
 
-                # 尝试突破 CF 盾（完全保留你原来的逻辑）
                 cf_passed = False
                 for attempt in range(5):
                     is_done = sb.execute_script("var cf = document.querySelector(\"input[name='cf-turnstile-response']\"); return cf && cf.value.length > 20;")
@@ -159,8 +157,8 @@ def main():
                     print(f"🖱️ 尝试验证 (第 {attempt + 1} 次)...")
                     try:
                         sb.uc_gui_click_captcha()
-                        print("⏳ 触发原生点击过盾，等待反应 (4秒)...")
-                        time.sleep(4)
+                        print("⏳ 触发原生点击过盾，等待反应 (5秒)...")
+                        time.sleep(5)
                     except Exception as e:
                         print(f"⚠️ 原生点击抛出异常: {e}")
 
@@ -172,17 +170,18 @@ def main():
                     print("⚠️ 原生未通过，尝试 xdotool 物理点击...")
                     coords = get_turnstile_coords(sb)
                     if coords:
-                        click_x = coords['x'] + random.randint(-8, 8)
-                        click_y = coords['y'] + random.randint(-4, 4)
+                        click_x = coords['x'] + random.randint(-10, 10)
+                        click_y = coords['y'] + random.randint(-5, 5)
+                        
                         os_hardware_click(click_x, click_y)
-                        print("⏳ 等待物理点击后的验证动画 (5秒)...")
-                        time.sleep(5)
+                        print("⏳ 等待物理点击后的验证动画 (6秒)...")
+                        time.sleep(6)
                     else:
                         print("⚠️ 仍未找到盾的位置坐标，等待重试...")
                         time.sleep(3)
 
                 if not cf_passed:
-                    print("❌ 警告：5 次尝试后 CF 盾仍未通过！")
+                    print("❌ 警告：5 次尝试后 CF 盾仍未通过，登录极大概率会被拦截！")
                     sb.save_screenshot("cf_failed_state.png")
                     send_tg_photo("❌ 警告：CF 过盾失败，停止提交登录。", "cf_failed_state.png")
                     sys.exit(1)
@@ -198,7 +197,6 @@ def main():
             print("🚀 等待页面数据加载并查找续期按键...")
             sb.sleep(8) 
             
-            # ================= 新增：提前抓取剩余时间并写入文件 =================
             expire_time_text = "未知"
             try:
                 expire_element = sb.wait_for_element('//*[contains(text(), "Expire")]/..', timeout=5)
@@ -210,9 +208,7 @@ def main():
                 print("📝 已将时间写入 next_time.txt，准备供工作流调整时间使用")
             except Exception as e:
                 print("⚠️ 无法在页面上找到剩余时间文本，将不写入文件。")
-            # ==============================================================
 
-            # 【高级容错逻辑】检测黄色提示消息
             too_early_sel = "//div[contains(., 'Renewal will be available 3 days before Expiration')]"
             if sb.is_element_visible(too_early_sel):
                 print("⏰ 检测到'续期将于到期前 3 天提供'提示，暂无需续期。")
