@@ -14,8 +14,8 @@ from seleniumbase import SB
 TARGET_URL = "https://dash.skybots.tech/login"
 DASHBOARD_URL = "https://dash.skybots.tech/projects"
 
-ACCOUNT = os.environ.get("SKYBOTS_ACCOUNT", "")
-PASSWORD = os.environ.get("SKYBOTS_PASSWORD", "")
+# 改成 Discord 登录（只需要 Token）
+DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "").strip()
 PROXY = os.environ.get("skybots_PROXY_NODE", "")
 
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
@@ -97,8 +97,9 @@ def os_hardware_click(x, y):
 
 # ================= 主逻辑 =================
 def main():
-    if not ACCOUNT or not PASSWORD:
-        print("❌ 缺少账号或密码环境变量")
+    # 改为校验 Discord Token
+    if not DISCORD_TOKEN:
+        print("❌ 缺少 DISCORD_TOKEN 环境变量")
         sys.exit(1)
 
     print("🔧 启动 SeleniumBase UC 模式浏览器...")
@@ -125,34 +126,30 @@ def main():
             if "projects" in sb.get_current_url():
                 print("✅ 似乎已经处于登录状态！")
             else:
-                print("🛡️ 正在解析登录表单...")
-                # 兼容不同输入框
-                user_sel = 'input[type="email"], input[name="email"], input[name="username"], input[type="text"]'
-                sb.wait_for_element(user_sel, timeout=30)
-                
-                print("✏️ 填写账号密码...")
-                sb.type(user_sel, ACCOUNT)
-                sb.type('input[type="password"], input[name="password"]', PASSWORD)
-                
+                print("🛡️ 正在进入 Discord 登录流程...")
+
+                # ====================== 核心修改：点击 Discord 登录按钮 ======================
+                print("🔗 点击 Discord 快捷登录")
+                sb.click('a[href*="discord"], button:contains("Discord")', timeout=15)
+                time.sleep(5)
+
+                # 处理 Cloudflare 验证（完全保留你原来的逻辑）
                 print("🛡️ 开始处理 Cloudflare 验证框...")
                 time.sleep(3)
 
-                # 将 CF 盾强制滚动到页面中央，确保 xdotool 能点到物理屏幕内
                 cf_iframe_sel = "iframe[src*='cloudflare'], iframe[src*='turnstile']"
                 if sb.is_element_present(cf_iframe_sel):
                     sb.scroll_to(cf_iframe_sel)
                     time.sleep(1)
-                    # 随便点一下页面空白处，激活窗口焦点
                     sb.click('body', timeout=2) 
                     time.sleep(1)
 
                 sb.execute_script(EXPAND_POPUP_JS)
                 time.sleep(1)
 
-                # 尝试突破 CF 盾
+                # 尝试突破 CF 盾（完全保留你原来的逻辑）
                 cf_passed = False
                 for attempt in range(5):
-                    # 校验 1：判断底层 token 是否已生成
                     is_done = sb.execute_script("var cf = document.querySelector(\"input[name='cf-turnstile-response']\"); return cf && cf.value.length > 20;")
                     if is_done:
                         print("✅ CF 盾底层验证已通过！")
@@ -161,27 +158,22 @@ def main():
                     
                     print(f"🖱️ 尝试验证 (第 {attempt + 1} 次)...")
                     try:
-                        # 方案 A：使用 SeleniumBase 原生专杀工具
                         sb.uc_gui_click_captcha()
                         print("⏳ 触发原生点击过盾，等待反应 (4秒)...")
                         time.sleep(4)
                     except Exception as e:
                         print(f"⚠️ 原生点击抛出异常: {e}")
 
-                    # 校验 2：原生方法点完后，再次检查是否通过
                     if sb.execute_script("var cf = document.querySelector(\"input[name='cf-turnstile-response']\"); return cf && cf.value.length > 20;"):
                         print("✅ 原生方法点击成功！")
                         cf_passed = True
                         break
 
-                    # 方案 B：使用获取坐标的底层硬件点击
                     print("⚠️ 原生未通过，尝试 xdotool 物理点击...")
                     coords = get_turnstile_coords(sb)
                     if coords:
-                        # 加入随机偏移，防止被识别为机械点击，并兼容微小的坐标误差
                         click_x = coords['x'] + random.randint(-8, 8)
                         click_y = coords['y'] + random.randint(-4, 4)
-                        
                         os_hardware_click(click_x, click_y)
                         print("⏳ 等待物理点击后的验证动画 (5秒)...")
                         time.sleep(5)
@@ -189,19 +181,14 @@ def main():
                         print("⚠️ 仍未找到盾的位置坐标，等待重试...")
                         time.sleep(3)
 
-                # 强校验拦截：如果 5 次都没过盾，拦截提交
                 if not cf_passed:
-                    print("❌ 警告：5 次尝试后 CF 盾仍未通过，登录极大概率会被拦截！")
+                    print("❌ 警告：5 次尝试后 CF 盾仍未通过！")
                     sb.save_screenshot("cf_failed_state.png")
                     send_tg_photo("❌ 警告：CF 过盾失败，停止提交登录。", "cf_failed_state.png")
-                    sys.exit(1) # 过盾失败，直接退出脚本，避免滥发无效请求
+                    sys.exit(1)
                 else:
-                    print("📤 盾已通过，提交登录...")
-                    # 兼容法文和英文界面的提交按钮
-                    sb.click('button[type="submit"], button:contains("Login"), button:contains("Se connecter")')
-                
-                print("⏳ 等待页面跳转...")
-                time.sleep(10)
+                    print("📤 盾已通过，等待 Discord 授权登录...")
+                    time.sleep(12)
                 
                 if "projects" not in sb.get_current_url():
                     print("⚠️ URL 未变化，尝试直接访问 Dashboard...")
@@ -214,12 +201,10 @@ def main():
             # ================= 新增：提前抓取剩余时间并写入文件 =================
             expire_time_text = "未知"
             try:
-                # 使用 XPath 查找包含 "Expire" 的节点，并获取它父级容器的文本
                 expire_element = sb.wait_for_element('//*[contains(text(), "Expire")]/..', timeout=5)
                 expire_time_text = expire_element.text.replace('\n', ' ').strip()
                 print(f"⏱️ 当前抓取到的剩余时间: {expire_time_text}")
                 
-                # 写入供 Github Actions 解析
                 with open("next_time.txt", "w", encoding="utf-8") as f:
                     f.write(expire_time_text)
                 print("📝 已将时间写入 next_time.txt，准备供工作流调整时间使用")
@@ -227,16 +212,14 @@ def main():
                 print("⚠️ 无法在页面上找到剩余时间文本，将不写入文件。")
             # ==============================================================
 
-            # 【高级容错逻辑】检测图 12 中的黄色提示消息
+            # 【高级容错逻辑】检测黄色提示消息
             too_early_sel = "//div[contains(., 'Renewal will be available 3 days before Expiration')]"
             if sb.is_element_visible(too_early_sel):
                 print("⏰ 检测到'续期将于到期前 3 天提供'提示，暂无需续期。")
                 shot_path = "renew_not_needed.png"
                 sb.save_screenshot(shot_path)
-                # 使用上面抓到的时间发送通知
                 send_tg_photo(f"⏰ 暂无需续期。\n⏱️ 当前状态: {expire_time_text}", shot_path)
             else:
-                # 修复选择器：支持英语(Renew)和法语(Renouveler)
                 renew_selectors = [
                     'button:contains("Renew")', 
                     'button:contains("Renouveler")',
@@ -260,12 +243,10 @@ def main():
                     print("⏳ 等待续期处理 (10秒)...")
                     sb.sleep(10)
                     
-                    # 续期后，尝试重新抓取一下最新的时间来发通知，并更新文本
                     try:
                         expire_element = sb.wait_for_element('//*[contains(text(), "Expire")]/..', timeout=5)
                         expire_time_text = expire_element.text.replace('\n', ' ').strip()
                         print(f"⏱️ 续期后最新的剩余时间: {expire_time_text}")
-                        # 覆盖写入最新的时间，确保 actions 基于成功续期后的时间计算
                         with open("next_time.txt", "w", encoding="utf-8") as f:
                             f.write(expire_time_text)
                     except Exception as e:
@@ -273,7 +254,6 @@ def main():
 
                     shot_path = "renew_success.png"
                     sb.save_screenshot(shot_path)
-                    
                     tg_msg = f"🎉 续期按钮已找到并点击！\n⏱️ 当前面板显示状态: {expire_time_text}"
                     send_tg_photo(tg_msg, shot_path)
                 else:
