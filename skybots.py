@@ -11,6 +11,7 @@ from datetime import datetime
 from seleniumbase import SB
 
 # ================= 配置区 =================
+# 请改成你的 Skybots 地址
 TARGET_URL = "https://dash.skybots.tech/login"
 DASHBOARD_URL = "https://dash.skybots.tech/projects"
 
@@ -57,7 +58,6 @@ EXPAND_POPUP_JS = """
 })();
 """
 
-# 【增强版】获取盾的绝对屏幕坐标
 def get_turnstile_coords(sb):
     return sb.execute_script("""
         var iframes = document.querySelectorAll('iframe');
@@ -82,7 +82,6 @@ def get_turnstile_coords(sb):
         return null;
     """)
 
-# 使用 Linux 底层工具进行物理点击
 def os_hardware_click(x, y):
     try:
         result = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "chrome"], capture_output=True, text=True)
@@ -98,7 +97,7 @@ def os_hardware_click(x, y):
         print(f"⚠️ xdotool 点击失败: {e}")
         return False
 
-# ================= 主逻辑 =================
+# ================= 主逻辑（带授权确认） =================
 def main():
     if not DISCORD_TOKEN:
         print("❌ 缺少 DISCORD_TOKEN 环境变量")
@@ -132,17 +131,9 @@ def main():
                 sb.click('a[href*="discord"], button:contains("Discord")', timeout=15)
                 time.sleep(5)
 
+                # 【关键】处理 CF 验证
                 print("🛡️ 开始处理 Cloudflare 验证框...")
                 time.sleep(3)
-
-                cf_iframe_sel = "iframe[src*='cloudflare'], iframe[src*='turnstile']"
-                if sb.is_element_present(cf_iframe_sel):
-                    sb.scroll_to(cf_iframe_sel)
-                    time.sleep(1)
-                    sb.click('body', timeout=2) 
-                    time.sleep(1)
-
-                # 【关键】强制显示并居中 CF 验证框
                 sb.execute_script(EXPAND_POPUP_JS)
                 time.sleep(2)
 
@@ -172,7 +163,6 @@ def main():
                     if coords:
                         click_x = coords['x'] + random.randint(-10, 10)
                         click_y = coords['y'] + random.randint(-5, 5)
-                        
                         os_hardware_click(click_x, click_y)
                         print("⏳ 等待物理点击后的验证动画 (6秒)...")
                         time.sleep(6)
@@ -181,14 +171,22 @@ def main():
                         time.sleep(3)
 
                 if not cf_passed:
-                    print("❌ 警告：5 次尝试后 CF 盾仍未通过，登录极大概率会被拦截！")
+                    print("❌ 警告：5 次尝试后 CF 盾仍未通过！")
                     sb.save_screenshot("cf_failed_state.png")
                     send_tg_photo("❌ 警告：CF 过盾失败，停止提交登录。", "cf_failed_state.png")
                     sys.exit(1)
                 else:
-                    print("📤 盾已通过，等待 Discord 授权登录...")
-                    time.sleep(12)
-                
+                    print("📤 盾已通过，等待跳转到 Discord 授权页...")
+                    time.sleep(10)
+
+                    # 【关键】自动点击「授权」按钮
+                    print("🔐 检测到 Discord 授权页，点击「授权」按钮")
+                    if sb.is_element_present('button:contains("授权")', timeout=10):
+                        sb.click('button:contains("授权")')
+                    elif sb.is_element_present('button:contains("Authorize")', timeout=10):
+                        sb.click('button:contains("Authorize")')
+                    time.sleep(15)
+
                 if "projects" not in sb.get_current_url():
                     print("⚠️ URL 未变化，尝试直接访问 Dashboard...")
                     sb.uc_open_with_reconnect(DASHBOARD_URL, reconnect_time=5)
